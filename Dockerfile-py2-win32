@@ -1,8 +1,8 @@
-FROM ubuntu:14.04
+FROM ubuntu:20.04
 
 ENV DEBIAN_FRONTEND noninteractive
 
-ARG WINE_VERSION=winehq-devel
+ARG WINE_VERSION=winehq-staging
 ARG PYTHON_VERSION=2.7.12
 ARG PYINSTALLER_VERSION=3.6
 
