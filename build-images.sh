@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# Docker flags
+FLAGS_NOCACHE="--no-cache --progress=plain"
+FLAGS="--progress=plain"
+
+FLAGTOUSE=$FLAGS
+
 function printSuccessOrFail {
     if [ $? -eq 0 ]; then
         echo "Success."
@@ -11,22 +17,22 @@ function printSuccessOrFail {
 
 echo "Starting build process..."
 
-docker build --progress=plain -f Dockerfile-py2-amd64 -t ddemuro/pyinstaller:py2-amd64 .
+docker build $FLAGTOUSE -f Dockerfile-py2-amd64 -t ddemuro/pyinstaller:py2-amd64 .
 printSuccessOrFail
 
-docker build --progress=plain -f Dockerfile-py2-win32 -t ddemuro/pyinstaller:py2-win32 .
+docker build $FLAGTOUSE -f Dockerfile-py2-win32 -t ddemuro/pyinstaller:py2-win32 .
 printSuccessOrFail
 
-docker build --progress=plain -f Dockerfile-py3-amd64 -t ddemuro/pyinstaller:py3-amd64 .
+docker build $FLAGTOUSE -f Dockerfile-py3-amd64 -t ddemuro/pyinstaller:py3-amd64 .
 printSuccessOrFail
 
-docker build --progress=plain -f Dockerfile-py3-i386 -t ddemuro/pyinstaller:py3-i386 .
+docker build $FLAGTOUSE -f Dockerfile-py3-i386 -t ddemuro/pyinstaller:py3-i386 .
 printSuccessOrFail
 
-docker build --progress=plain -f Dockerfile-py3-win32 -t ddemuro/pyinstaller:py3-win32 .
+docker build $FLAGTOUSE -f Dockerfile-py3-win32 -t ddemuro/pyinstaller:py3-win32 .
 printSuccessOrFail
 
-docker build --progress=plain -f Dockerfile-py3-win64 -t ddemuro/pyinstaller:py3-win64 .
+docker build $FLAGTOUSE -f Dockerfile-py3-win64 -t ddemuro/pyinstaller:py3-win64 .
 printSuccessOrFail
 
 echo "Build process completed."

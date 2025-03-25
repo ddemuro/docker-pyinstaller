@@ -78,20 +78,20 @@ RUN set -x \
     && mv vc_redist.x86.exe "$W_TMP"/vc_redist.x86.exe \
     && cabextract -q --directory="$W_TMP" "$W_TMP"/vc_redist.x86.exe \
     && ls -la "$W_TMP" \
-    && cabextract -q --directory="$W_TMP" "$W_TMP/u4" || true \
-    && cabextract -q --directory="$W_TMP" "$W_TMP/u5" || true \
-    && cabextract -q --directory="$W_TMP" "$W_TMP/u6" || true \
-    && cabextract -q --directory="$W_TMP" "$W_TMP/u7" || true \
-    && cabextract -q --directory="$W_TMP" "$W_TMP/u8" || true \
-    && cabextract -q --directory="$W_TMP" "$W_TMP/u9" || true \
-    && cabextract -q --directory="$W_TMP" "$W_TMP/u31" || true \
+    # Extract for each folder in $W_TMP
+    &&for i in "$W_TMP"/*; do \
+        cabextract -q --directory="$W_TMP" "$i"; \
+    done \
     && cd "$W_TMP" || true \
     && rename 's/_/\-/g' *.dll || true \
     && cp "$W_TMP"/*.dll "$W_SYSTEM_DLLS" / || true \
-    && rm -rf "$W_TMP"/vc_redist.x86.exe
+    && rm -rf "$W_TMP"/vc_redist.x86.exe || true
 
 # install pyinstaller
 RUN /usr/bin/pip install pyinstaller==$PYINSTALLER_VERSION
+RUN /usr/bin/pip install pywin32 \
+    && /usr/bin/pip install tk \
+    && /usr/bin/pip install pystray
 
 # put the src folder inside wine
 RUN mkdir /src/ && ln -s /src /wine/drive_c/src

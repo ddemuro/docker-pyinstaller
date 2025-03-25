@@ -76,15 +76,19 @@ RUN set -x \
     && mkdir -p "$W_TMP" \
     && mv vc_redist.x64.exe "$W_TMP"/ \
     && cabextract -q --directory="$W_TMP" "$W_TMP"/vc_redist.x64.exe \
-    && cabextract -q --directory="$W_TMP" "$W_TMP/a11" \
-    && cabextract -q --directory="$W_TMP" "$W_TMP/a12" \
-    && cabextract -q --directory="$W_TMP" "$W_TMP/a13" \
-    && cd "$W_TMP" \
-    && rename 's/_/\-/g' *.dll \
-    && cp "$W_TMP"/*.dll "$W_SYSTEM64_DLLS"/
+    # Extract for each folder in $W_TMP
+    &&for i in "$W_TMP"/*; do \
+        cabextract -q --directory="$W_TMP" "$i"; \
+    done \
+    && cd "$W_TMP" || true \
+    && rename 's/_/\-/g' *.dll || true \
+    && cp "$W_TMP"/*.dll "$W_SYSTEM64_DLLS"/ || true
 
 # install pyinstaller
 RUN /usr/bin/pip install pyinstaller==$PYINSTALLER_VERSION
+RUN /usr/bin/pip install pywin32 \
+    && /usr/bin/pip install tk \
+    && /usr/bin/pip install pystray
 
 # put the src folder inside wine
 RUN mkdir /src/ && ln -s /src /wine/drive_c/src

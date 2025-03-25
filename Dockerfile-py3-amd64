@@ -41,7 +41,8 @@ RUN \
         uuid-dev \
         #upx
         upx \
-        python3-tk tk-dev lzma liblzma-dev libbz2-dev\
+        python3-tk tk-dev lzma liblzma-dev libbz2-dev \
+        libjpeg-dev zlib1g-dev \
     # install pyenv
     && echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc \
     && echo 'export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc \
@@ -56,6 +57,9 @@ RUN \
     && pip install --upgrade pip \
     # install pyinstaller
     && pip install pyinstaller==$PYINSTALLER_VERSION \
+    && pip install pystray \
+    && pip install tk \
+    && pip install tcl \
     && mkdir /src/ \
     && chmod +x /entrypoint.sh
 
