@@ -1,0 +1,105 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND noninteractive
+
+ARG WINE_VERSION=winehq-staging
+ARG PYTHON_VERSION=3.9.9
+ARG PYINSTALLER_VERSION=6.12.0
+
+# wine settings
+ENV WINEARCH win32
+ENV WINEDEBUG fixme-all
+ENV WINEPREFIX /wine
+
+# xvfb settings
+# from https://github.com/engineervix/docker-pyinstaller/blob/b99163b6eb0a81fc9a0bfd498c09c4e0253d01b2/Dockerfile-py3-win64#L56-L59
+ENV DISPLAY :0
+RUN set -x \
+    && echo 'Xvfb $DISPLAY -screen 0 1024x768x24 &' >> /root/.bashrc
+
+# PYPI repository location
+ENV PYPI_URL=https://pypi.python.org/
+# PYPI index location
+ENV PYPI_INDEX_URL=https://pypi.python.org/simple
+
+ENV W_DRIVE_C=/wine/drive_c
+ENV W_WINDIR_UNIX="$W_DRIVE_C/windows"
+ENV W_SYSTEM_DLLS="$W_WINDIR_UNIX/system32"
+ENV W_TMP="$W_DRIVE_C/windows/temp/_$0"
+
+# we need wine for this all to work, so we'll use the PPA
+RUN set -x \
+    && dpkg --add-architecture i386 \
+    && apt-get update -qy \
+    && apt-get install --no-install-recommends -qfy apt-transport-https software-properties-common wget xvfb xdotool x11-utils xterm gpg-agent rename python3-tk \
+    && wget -nv https://dl.winehq.org/wine-builds/winehq.key \
+    && apt-key add winehq.key \
+    && add-apt-repository 'https://dl.winehq.org/wine-builds/ubuntu/' \
+    && apt-get update -qy \
+    && apt-get install --no-install-recommends -qfy $WINE_VERSION winbind cabextract \
+    && apt-get clean \
+    && wget -nv https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks \
+    && chmod +x winetricks \
+    && mv winetricks /usr/local/bin
+
+# Copy the python installer files
+COPY ./installers/python-399/win32/ ./
+COPY ./installers/vc_redist.x86.exe vc_redist.x86.exe
+
+# install python in wine, using the msi packages to install, extracting
+# the files directly, since installing isn't running correctly.
+RUN set -x \
+    && winetricks win7 \
+    && for msifile in `echo core dev exe lib path pip tcltk`; do \
+        wine msiexec /i "${msifile}.msi" /qb TARGETDIR=C:/Python; \
+        rm ${msifile}.msi; \
+    done \
+    && cd /wine/drive_c/Python \
+    && ls -la /wine/drive_c/Python \
+    && wine 'C:\Python\python.exe' -m pip install -U pip \
+    && echo 'wine '\''C:\Python\python.exe'\'' "$@"' > /usr/bin/python \
+    && echo 'wine '\''C:\Python\Scripts\easy_install.exe'\'' "$@"' > /usr/bin/easy_install \
+    && echo 'wine '\''C:\Python\Scripts\pip.exe'\'' "$@"' > /usr/bin/pip \
+    && echo 'wine '\''C:\Python\Scripts\pyinstaller.exe'\'' "$@"' > /usr/bin/pyinstaller \
+    && echo 'wine '\''C:\Python\Scripts\pyupdater.exe'\'' "$@"' > /usr/bin/pyupdater \
+    && echo 'assoc .py=PythonScript' | wine cmd \
+    && echo 'ftype PythonScript=c:\Python\python.exe "%1" %*' | wine cmd \
+    && while pgrep wineserver >/dev/null; do echo "Waiting for wineserver"; sleep 1; done \
+    && chmod +x /usr/bin/python /usr/bin/easy_install /usr/bin/pip /usr/bin/pyinstaller /usr/bin/pyupdater \
+    && (pip install -U pip || true) \
+    && /usr/bin/pip install --upgrade pip || true \
+    && /usr/bin/pip install --upgrade setuptools || true \
+    && rm -rf /tmp/.wine-*
+
+# install Microsoft Visual C++ Redistributable for Visual Studio 2017 dll files
+RUN set -x \
+    && rm -f "$W_TMP"/* \
+    && mkdir -p "$W_TMP" \
+    && mv vc_redist.x86.exe "$W_TMP"/vc_redist.x86.exe \
+    && cabextract -q --directory="$W_TMP" "$W_TMP"/vc_redist.x86.exe \
+    && ls -la "$W_TMP" \
+    # Extract for each folder in $W_TMP
+    &&for i in "$W_TMP"/*; do \
+        cabextract -q --directory="$W_TMP" "$i"; \
+    done \
+    && cd "$W_TMP" \
+    && rename 's/_/\-/g' *.dll \
+    && cp "$W_TMP"/*.dll "$W_SYSTEM_DLLS"/
+
+# install pyinstaller
+RUN /usr/bin/pip install pyinstaller==$PYINSTALLER_VERSION
+RUN /usr/bin/pip install pywin32 \
+    && /usr/bin/pip install tk \
+    && /usr/bin/pip install tcl \
+    && /usr/bin/pip install pystray
+
+# put the src folder inside wine
+RUN mkdir /src/ && ln -s /src /wine/drive_c/src
+VOLUME /src/
+WORKDIR /wine/drive_c/src/
+RUN mkdir -p /wine/drive_c/tmp
+
+COPY entrypoint-windows.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
