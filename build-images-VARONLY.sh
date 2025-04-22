@@ -88,11 +88,17 @@ function printSuccessOrFail {
 
 echo "Building py3-$PYTHON_VERSION and pyinstaller $PYINSTALLER_VERSION..."
 docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-amd64-VAR -t ddemuro/pyinstaller:py3-amd64-$PYTHON_VERSION-$PYINSTALLER_VERSION -t ddemuro/pyinstaller:py3-amd64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY .
-printSuccessOrFail
+PID1=$!
 docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-win32-VAR -t ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION -t ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY .
-printSuccessOrFail
+PID2=$!
 docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-win64-VAR -t ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION -t ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY .
-printSuccessOrFail
+PID3=$!
+
+wait $PID1 $PID2 $PID3
+
+echo "First command completed with status ${PIPESTATUS[0]}"
+echo "Second command completed with status ${PIPESTATUS[1]}"
+echo "Third command completed with status ${PIPESTATUS[2]}"
 
 # echo "Build process completed."
 
