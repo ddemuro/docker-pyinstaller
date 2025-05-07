@@ -1,4 +1,15 @@
-# PyInstaller Docker Images
+# Derek's Extensions
+
+## Official pyinstaller images
+
+To create a new image: ./build-images-VARONLY.sh 3.12.9 6.13.0
+To create a new image with a different version of Python: ./build-images.sh 3.12.9 6.13.0
+
+## Testing only unofficial images - Private server only
+
+To create a new image: ./build-images-CUSTOM.sh 3.12.9 6.13.0
+
+## PyInstaller Docker Images
 
 **cdrx/pyinstaller-linux** and **cdrx/pyinstaller-windows** are a pair of Docker containers to ease compiling Python applications to binaries / exe files.
 
