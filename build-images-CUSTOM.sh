@@ -87,11 +87,11 @@ function printSuccessOrFail {
 }
 
 echo "Building py3-$PYTHON_VERSION and pyinstaller $PYINSTALLER_VERSION..."
-docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-amd64-CUSTOM -t ddemuro/pyinstaller:py3-amd64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY-CUSTOM .
+docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-amd64-CUSTOM -t dkrhub.takelan.com/ddemuro/pyinstaller:py3-amd64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY-CUSTOM .
 PID1=$!
-docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-win32-CUSTOM -t ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY-CUSTOM .
+docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-win32-CUSTOM -t dkrhub.takelan.com/ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY-CUSTOM .
 PID2=$!
-docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-win64-CUSTOM -t ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY-CUSTOM .
+docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-win64-CUSTOM -t dkrhub.takelan.com/ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY-CUSTOM .
 PID3=$!
 
 wait $PID1 $PID2 $PID3
