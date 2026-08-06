@@ -93,6 +93,24 @@ RUN /usr/bin/pip install pywin32 \
     && /usr/bin/pip install tcl \
     && /usr/bin/pip install pystray
 
+# install a real MSVC toolchain (cl.exe/link.exe) that runs under wine via
+# msvc-wine, so C / Cython extensions with no prebuilt wheel can be compiled.
+# ARCH is x64 here (win64); msvc-wine downloads the actual VS Build Tools + SDK.
+ARG MSVC_ARCH=x64
+RUN set -x \
+    && apt-get update -qy \
+    && apt-get install --no-install-recommends -qfy msitools ca-certificates \
+    && apt-get clean
+COPY msvc-wine/ /opt/msvc-src/
+RUN set -x \
+    && cd /opt/msvc-src \
+    && PYTHONUNBUFFERED=1 ./vsdownload.py --accept-license --dest /opt/msvc \
+        --host-arch ${MSVC_ARCH} --architecture ${MSVC_ARCH} \
+    && ./install.sh /opt/msvc \
+    && cd / && rm -rf /opt/msvc-src \
+    # activation script sourced by the entrypoint (real per-arch path, no symlink)
+    && printf '. /opt/msvc/bin/%s/msvcenv.sh\nexport DISTUTILS_USE_SDK=1 MSSdk=1\n' "${MSVC_ARCH}" > /opt/msvc/activate.sh
+
 # put the src folder inside wine
 RUN mkdir /src/ && ln -s /src /wine/drive_c/src
 VOLUME /src/

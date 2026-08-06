@@ -29,12 +29,15 @@ fi
 # Check with the user the versions
 echo "Python version: $PYTHON_VERSION"
 echo "PyInstaller version: $PYINSTALLER_VERSION"
-# Confirm
-read -p "Are you sure you want to build with these versions? (y/n) " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Exiting..."
-    exit 1
+
+if [ -z "$PYTHON_VERSION" ] || [ -z "$PYINSTALLER_VERSION" ]; then
+    # Confirm only if we auto-detected (user didn't provide explicit versions)
+    read -p "Are you sure you want to build with these versions? (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Exiting..."
+        exit 1
+    fi
 fi
 
 # Download the $1 version of python
@@ -86,39 +89,67 @@ function printSuccessOrFail {
     fi
 }
 
-echo "Building py3-$PYTHON_VERSION and pyinstaller $PYINSTALLER_VERSION..."
-docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-amd64-VAR -t ddemuro/pyinstaller:py3-amd64-$PYTHON_VERSION-$PYINSTALLER_VERSION -t ddemuro/pyinstaller:py3-amd64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY .
-PID1=$!
-docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-win32-VAR -t ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION -t ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY .
-PID2=$!
-docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-win64-VAR -t ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION -t ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY .
-PID3=$!
+echo "Building py3-$PYTHON_VERSION and pyinstaller $PYINSTALLER_VERSION for all Ubuntu LTS variants..."
 
-wait $PID1 $PID2 $PID3
+# Dockerfile paths
+declare -a UBUNTU_FILES=("Dockerfile-py3-amd64-20.04" "Dockerfile-py3-amd64-22.04" "Dockerfile-py3-amd64-24.04" "Dockerfile-py3-amd64-26.04")
+declare -a UBUNTU_TAGS=("20.04" "22.04" "24.04" "26.04")
+declare -a PIDs
 
-echo "First command completed with status ${PIPESTATUS[0]}"
-echo "Second command completed with status ${PIPESTATUS[1]}"
-echo "Third command completed with status ${PIPESTATUS[2]}"
+# Build all Ubuntu linux variants in parallel
+for i in "${!UBUNTU_FILES[@]}"; do
+    docker build \
+        --build-arg PYTHON_VERSION=$PYTHON_VERSION \
+        --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION \
+        $FLAGTOUSE \
+        -f ${UBUNTU_FILES[$i]} \
+        -t ddemuro/pyinstaller:py3-amd64-ubuntu${UBUNTU_TAGS[$i]}-$PYTHON_VERSION-$PYINSTALLER_VERSION \
+        -t ddemuro/pyinstaller:py3-amd64-ubuntu${UBUNTU_TAGS[$i]}-${TODAY} . &
+    PIDs+=($!)
+done
+
+# Build Windows variants in parallel (same order as before)
+docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-win32-VAR -t ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION -t ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY . &
+PIDs+=($!)
+
+docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-win64-VAR -t ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION -t ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY . &
+PIDs+=($!)
+
+wait ${PIDs[@]}
+
+for i in "${!PIDs[@]}"; do
+    echo "Build ${i} completed with PID=${PIDs[$i]}"
+done
 
 # echo "Build process completed."
 
-docker push ddemuro/pyinstaller:py3-amd64-$PYTHON_VERSION-$PYINSTALLER_VERSION &
-docker push ddemuro/pyinstaller:py3-i386-$PYTHON_VERSION-$PYINSTALLER_VERSION &
+echo "Pushing images to Docker Hub..."
+
+# Push Docker Hub images - all Ubuntu linux variants
+for i in "${!UBUNTU_FILES[@]}"; do
+    docker push ddemuro/pyinstaller:py3-amd64-ubuntu${UBUNTU_TAGS[$i]}-$PYTHON_VERSION-$PYINSTALLER_VERSION &
+    docker push ddemuro/pyinstaller:py3-amd64-ubuntu${UBUNTU_TAGS[$i]}-${TODAY} &
+done
+
+# Push Windows variants (unchanged from before)
 docker push ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION &
 docker push ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION &
-docker push ddemuro/pyinstaller:py3-amd64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY &
-docker push ddemuro/pyinstaller:py3-i386-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY &
 docker push ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY &
 docker push ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY &
 time wait
 echo "Images pushed to Docker Hub."
 
-docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-amd64-$PYTHON_VERSION-$PYINSTALLER_VERSION &
-docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-i386-$PYTHON_VERSION-$PYINSTALLER_VERSION &
+echo "Pushing images to private repo..."
+
+# Push private repo - all Ubuntu linux variants
+for i in "${!UBUNTU_FILES[@]}"; do
+    docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-amd64-ubuntu${UBUNTU_TAGS[$i]}-$PYTHON_VERSION-$PYINSTALLER_VERSION &
+    docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-amd64-ubuntu${UBUNTU_TAGS[$i]}-${TODAY} &
+done
+
+# Push Windows variants (unchanged from before)
 docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION &
 docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION &
-docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-amd64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY &
-docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-i386-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY &
 docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY &
 docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY &
 time wait

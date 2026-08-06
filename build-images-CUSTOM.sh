@@ -11,12 +11,12 @@ PYTHON_VERSION=$1
 PYINSTALLER_VERSION=$2
 
 # If no python version is provided, use the latest version
-# if [ -z "$PYTHON_VERSION" ]; then
-#     echo "No python version provided. Using latest version."
-#     PYTHON_VERSION=$(curl -s https://www.python.org/ftp/python/ | grep -oP '(?<=href=")[0-9]+\.[0-9]+\.[0-9]+(?=/)' | sort -V | tail -n 1)
-# else
-#     PYTHON_VERSION=$PYTHON_VERSION
-# fi
+if [ -z "$PYTHON_VERSION" ]; then
+    echo "No python version provided. Using latest version."
+    PYTHON_VERSION=$(curl -s https://www.python.org/ftp/python/ | grep -oP '(?<=href=")[0-9]+\.[0-9]+\.[0-9]+(?=/)' | sort -V | tail -n 1)
+else
+    PYTHON_VERSION=$PYTHON_VERSION
+fi
 
 # If no pyinstaller version is provided, use the latest version
 if [ -z "$PYINSTALLER_VERSION" ]; then
@@ -29,15 +29,27 @@ fi
 # Check with the user the versions
 echo "Python version: $PYTHON_VERSION"
 echo "PyInstaller version: $PYINSTALLER_VERSION"
-# Confirm
-read -p "Are you sure you want to build with these versions? (y/n) " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Exiting..."
-    exit 1
+
+if [ -z "$PYTHON_VERSION" ] || [ -z "$PYINSTALLER_VERSION" ]; then
+    # Confirm only if we auto-detected (user didn't provide explicit versions)
+    read -p "Are you sure you want to build with these versions? (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Exiting..."
+        exit 1
+    fi
 fi
 
-# Download the $1 version of python
+function printSuccessOrFail {
+    if [ $? -eq 0 ]; then
+        echo "Success."
+    else
+        echo "Failed."
+        exit 1
+    fi
+}
+
+# Download the $PYTHON_VERSION of python (Wine build installers)
 cd installers
 mkdir python-$PYTHON_VERSION
 cd python-$PYTHON_VERSION
@@ -77,36 +89,51 @@ cd .. # cd installers
 
 echo "Done downloading new version"
 
-function printSuccessOrFail {
-    if [ $? -eq 0 ]; then
-        echo "Success."
-    else
-        echo "Failed."
-        exit 1
-    fi
-}
+echo "Building py3-$PYTHON_VERSION and pyinstaller $PYINSTALLER_VERSION for all Ubuntu LTS variants..."
 
-echo "Building py3-$PYTHON_VERSION and pyinstaller $PYINSTALLER_VERSION..."
-docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-amd64-CUSTOM -t dkrhub.takelan.com/ddemuro/pyinstaller:py3-amd64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY-CUSTOM .
-PID1=$!
-docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-win32-CUSTOM -t dkrhub.takelan.com/ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY-CUSTOM .
-PID2=$!
-docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-win64-CUSTOM -t dkrhub.takelan.com/ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY-CUSTOM .
-PID3=$!
+# Dockerfile paths - Ubuntu Linux amd64 base images
+declare -a UBUNTU_FILES=("Dockerfile-py3-amd64-20.04" "Dockerfile-py3-amd64-22.04" "Dockerfile-py3-amd64-24.04" "Dockerfile-py3-amd64-26.04")
+declare -a UBUNTU_TAGS=("20.04" "22.04" "24.04" "26.04")
+declare -a PIDs
 
-wait $PID1 $PID2 $PID3
+# Build all Ubuntu linux amd64 variants in parallel
+for i in "${!UBUNTU_FILES[@]}"; do
+    docker build \
+        --build-arg PYTHON_VERSION=$PYTHON_VERSION \
+        --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION \
+        $FLAGTOUSE \
+        -f ${UBUNTU_FILES[$i]} \
+        -t dkrhub.takelan.com/ddemuro/pyinstaller:py3-amd64-ubuntu${UBUNTU_TAGS[$i]}-CUSTOM-$PYTHON_VERSION-$PYINSTALLER_VERSION \
+        -t dkrhub.takelan.com/ddemuro/pyinstaller:py3-amd64-ubuntu${UBUNTU_TAGS[$i]}-${TODAY}-CUSTOM . &
+    PIDs+=($!)
+done
 
-echo "First command completed with status ${PIPESTATUS[0]}"
-echo "Second command completed with status ${PIPESTATUS[1]}"
-echo "Third command completed with status ${PIPESTATUS[2]}"
+# Build Windows variants in parallel (same order as before but use CUSTOM Dockerfiles)
+docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-win32-CUSTOM -t dkrhub.takelan.com/ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY-CUSTOM . &
+PIDs+=($!)
+
+docker build --build-arg PYTHON_VERSION=$PYTHON_VERSION --build-arg PYINSTALLER_VERSION=$PYINSTALLER_VERSION $FLAGTOUSE -f Dockerfile-py3-win64-CUSTOM -t dkrhub.takelan.com/ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY-CUSTOM . &
+PIDs+=($!)
+
+wait ${PIDs[@]}
+
+for i in "${!PIDs[@]}"; do
+    echo "Build ${i} completed with PID=${PIDs[$i]}"
+done
 
 # echo "Build process completed."
 
-echo "Images pushed to Docker Hub."
-docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-amd64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY-CUSTOM &
-docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-i386-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY-CUSTOM &
-docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY-CUSTOM &
-docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION-$TODAY-CUSTOM &
+echo "Pushing images to private repo..."
+
+# Push private repo - all Ubuntu linux amd64 variants
+for i in "${!UBUNTU_FILES[@]}"; do
+    docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-amd64-ubuntu${UBUNTU_TAGS[$i]}-CUSTOM-$PYTHON_VERSION-$PYINSTALLER_VERSION &
+    docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-amd64-ubuntu${UBUNTU_TAGS[$i]}-${TODAY}-CUSTOM &
+done
+
+# Push Windows variants — versioned + date-suffixed, matching what was built above
+docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-win32-$PYTHON_VERSION-$PYINSTALLER_VERSION-${TODAY}-CUSTOM &
+docker push dkrhub.takelan.com/ddemuro/pyinstaller:py3-win64-$PYTHON_VERSION-$PYINSTALLER_VERSION-${TODAY}-CUSTOM &
 time wait
 echo "Images pushed to private repo."
 

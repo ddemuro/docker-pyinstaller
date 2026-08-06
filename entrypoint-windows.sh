@@ -6,6 +6,13 @@ set -e
 # Make sure .bashrc is sourced
 . /root/.bashrc
 
+# Activate the MSVC (msvc-wine) build environment if it is present, so that
+# `pip install` can compile C / Cython extensions with cl.exe under wine.
+# The guard keeps this a no-op on images that don't ship the toolchain.
+if [ -f /opt/msvc/activate.sh ]; then
+    . /opt/msvc/activate.sh
+fi
+
 # Allow the workdir to be set using an env var.
 # Useful for CI pipiles which use docker for their build steps
 # and don't allow that much flexibility to mount volumes
