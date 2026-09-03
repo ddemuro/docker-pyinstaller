@@ -1,0 +1,92 @@
+# CUSTOM image: ships a PyInstaller bootloader compiled from source (native gcc)
+# inside the image - NOT the prebuilt one from the pip wheel. See the block after
+# the PyInstaller install below, installers/bootloader-build.sh, and README.md.
+# CUSTOM-only; VAR uses Dockerfile-py3-amd64-<LTS> (shared, stock bootloader).
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND noninteractive
+
+ARG PYTHON_VERSION=3.9.9
+ARG PYINSTALLER_VERSION=6.13.0
+
+ENV PYPI_URL=https://pypi.python.org/
+ENV PYPI_INDEX_URL=https://pypi.python.org/simple
+ENV PYENV_VERSION=${PYTHON_VERSION}
+
+# set compilation environment for python
+ENV PYTHON_CONFIGURE_OPTS=--enable-shared
+ENV CPPFLAGS=-O2
+
+COPY entrypoint-linux.sh /entrypoint.sh
+
+RUN \
+    set -x \
+    # update system
+    && apt-get update \
+    # install requirements
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        curl \
+        wget \
+        git \
+        libbz2-dev \
+        libreadline-dev \
+        libsqlite3-dev \
+        libssl-dev \
+        zlib1g-dev \
+        libffi-dev \
+        openssl \
+        # optional libraries
+        libgdbm-dev \
+        # libgdbm5 for ubuntu 18.04
+        # libgdbm6 for ubuntu 20.04+
+        libgdbm6 \
+        uuid-dev \
+        # upx
+        upx \
+        python3-tk tk-dev lzma liblzma-dev libbz2-dev \
+        libjpeg-dev zlib1g-dev \
+    # install pyenv
+    && echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc \
+    && echo 'export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc \
+    && . ~/.bashrc \
+    && curl -L https://github.com/pyenv/pyenv-installer/raw/master/bin/pyenv-installer | bash \
+    && echo 'eval "$(pyenv init -)"' >> ~/.bashrc \
+    && echo 'eval "$(pyenv init --path)"' >> ~/.bashrc \
+    && . ~/.bashrc \
+    # install python
+    && pyenv install $PYTHON_VERSION \
+    && pyenv global $PYTHON_VERSION \
+    && pip install --upgrade pip \
+    # install pyinstaller
+    && pip install pyinstaller==$PYINSTALLER_VERSION \
+    && pip install pystray \
+    && pip install tk \
+    && pip install tcl \
+    && mkdir /src/ \
+    && chmod +x /entrypoint.sh
+
+# --- self-compiled Linux (ELF) bootloader: what makes this a CUSTOM image ---
+# Compile the bootloader from the pinned PyInstaller sdist with the image's own
+# gcc, then overlay it onto the pip-installed PyInstaller. bootloader-build.sh
+# enforces the version-pin guard and the fail-on-equal (no silent no-op) guard,
+# and writes /bootloader-manifest.json. This is CUSTOM-only; the VAR images use
+# the shared Dockerfile-py3-amd64-<LTS> (stock bootloader) - keep it that way.
+COPY installers/bootloader-build.sh /usr/local/bin/bootloader-build.sh
+RUN set -eux \
+    && export PYENV_ROOT="$HOME/.pyenv" \
+    && export PATH="$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH" \
+    && chmod +x /usr/local/bin/bootloader-build.sh \
+    && TARGET_OS=linux \
+       PYINSTALLER_VERSION="$PYINSTALLER_VERSION" \
+       OVERLAY_INTO="$(python3 -c 'import os, PyInstaller; print(os.path.join(os.path.dirname(PyInstaller.__file__), "bootloader"))')" \
+       /usr/local/bin/bootloader-build.sh \
+    && echo "=== self-compiled bootloader manifest ===" \
+    && cat /bootloader-manifest.json
+
+
+VOLUME /src/
+WORKDIR /src/
+
+ENTRYPOINT ["/entrypoint.sh"]

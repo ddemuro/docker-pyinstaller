@@ -1,10 +1,79 @@
+# =============================================================================
+# Stage 1 - bootloader-builder
+#
+# "-CUSTOM" means the image ships a PyInstaller bootloader COMPILED FROM SOURCE
+# inside the image, not the upstream prebuilt binary from the pip wheel. This
+# stage downloads the *source* sdist for the pinned PyInstaller version and
+# compiles the 32-bit Windows bootloader with a real MSVC toolchain
+# (cl.exe/link.exe under wine via msvc-wine). msvc-wine is x64-hosted, so the
+# 32-bit target is produced by the Hostx64/x86 cross compiler inside a win64
+# wine prefix; the target bitness is chosen by waf's --target-arch=32bit.
+#
+# The bootloader source version is pinned to PYINSTALLER_VERSION - the exact same
+# version the final stage pip-installs. A mismatched bootloader/PyInstaller pair
+# crashes frozen apps at launch, so the final stage enforces they are equal.
+# =============================================================================
+FROM ubuntu:24.04 AS bootloader-builder
+
+ENV DEBIAN_FRONTEND noninteractive
+ENV WINEARCH win64
+ENV WINEDEBUG fixme-all
+
+# Must equal the PYINSTALLER_VERSION pip-installed in the final stage.
+ARG PYINSTALLER_VERSION=6.13.0
+# msvc-wine is x64-hosted; win32 uses the x86 (Hostx64/x86) cross target.
+ARG MSVC_ARCH=x86
+ARG PYI_TARGET_ARCH=32bit
+
+# Prerequisites for msvc-wine + waf. ca-certificates must exist before we hit the
+# winehq HTTPS repo below.
+RUN set -x \
+    && apt-get update -qy \
+    && apt-get install --no-install-recommends -qfy \
+       ca-certificates python3 python3-pip xz-utils msitools \
+    && apt-get clean
+
+# winehq-staging (needed to run cl.exe/link.exe under wine). Signing key vendored
+# (installers/winehq.key) and wired via signed-by - no network key fetch.
+COPY installers/winehq.key /etc/apt/keyrings/winehq-archive.key
+RUN set -x \
+    && dpkg --add-architecture i386 \
+    && echo 'deb [signed-by=/etc/apt/keyrings/winehq-archive.key] https://dl.winehq.org/wine-builds/ubuntu/ noble main' \
+       > /etc/apt/sources.list.d/winehq.list \
+    && apt-get update -qy \
+    && apt-get install --no-install-recommends -qfy winehq-staging winbind \
+    && apt-get clean
+
+# Real MSVC under wine. Host x64, target x86 (the cross compiler for 32-bit).
+COPY msvc-wine/ /opt/msvc-src/
+RUN set -x \
+    && cd /opt/msvc-src \
+    && PYTHONUNBUFFERED=1 ./vsdownload.py --accept-license --dest /opt/msvc \
+        --host-arch x64 --architecture ${MSVC_ARCH} \
+    && ./install.sh /opt/msvc \
+    && cd / && rm -rf /opt/msvc-src \
+    && printf '. /opt/msvc/bin/%s/msvcenv.sh\nexport DISTUTILS_USE_SDK=1 MSSdk=1\n' "${MSVC_ARCH}" > /opt/msvc/activate.sh
+
+# Compile the bootloader from the pinned sdist. Produces:
+#   /out/bootloader/Windows-32bit-intel/{run,runw,run_d,runw_d}.exe
+#   /out/bootloader-manifest.json
+COPY installers/bootloader-build.sh /usr/local/bin/bootloader-build.sh
+RUN chmod +x /usr/local/bin/bootloader-build.sh \
+    && MSVC_ARCH=${MSVC_ARCH} PYINSTALLER_VERSION=${PYINSTALLER_VERSION} PYI_TARGET_ARCH=${PYI_TARGET_ARCH} \
+       /usr/local/bin/bootloader-build.sh
+
+
+# =============================================================================
+# Stage 2 - the CUSTOM runtime image (Python-in-wine + self-compiled bootloader)
+# =============================================================================
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND noninteractive
 
 ARG WINE_VERSION=winehq-staging
 ARG PYTHON_VERSION=3.9.9
-ARG PYINSTALLER_VERSION=6.12.0
+# MUST match the bootloader-builder stage above (same source == same version).
+ARG PYINSTALLER_VERSION=6.13.0
 
 # wine settings
 ENV WINEARCH win32
@@ -86,18 +155,44 @@ RUN set -x \
     && rename 's/_/\-/g' *.dll \
     && cp "$W_TMP"/*.dll "$W_SYSTEM_DLLS"/
 
-# install pyinstaller
-COPY ./pyinstaller ./pyinstaller
+# install pyinstaller (stock wheel) then overlay the SELF-COMPILED bootloader
+# built in stage 1. The guard below makes the old silent no-op impossible.
+COPY --from=bootloader-builder /out/bootloader/ /custom-bootloader/
+COPY --from=bootloader-builder /out/bootloader-manifest.json /bootloader-manifest.json
 
-# Install custom pyinstaller
-RUN ls -la . \
+ENV BL_DIR=/wine/drive_c/Python/Lib/site-packages/PyInstaller/bootloader
+
+RUN set -eux \
     && /usr/bin/pip install pyinstaller==$PYINSTALLER_VERSION \
-    && ls -la /wine/drive_c/Python/Lib/site-packages \
-    && ls -la /wine/drive_c/Python/Lib/site-packages/PyInstaller \
-    && rsync -vPrl pyinstaller/PyInstaller/bootloader/ /wine/drive_c/Python/Lib/site-packages/PyInstaller/bootloader/ \
-    && md5sum /wine/drive_c/Python/Lib/site-packages/PyInstaller/bootloader/*/*.exe \
-    && md5sum ./pyinstaller/PyInstaller/bootloader/*/*.exe \
-    && rm -rf pyinstaller
+    # --- version-pin guard (step 3): the compiled bootloader and the installed
+    #     PyInstaller MUST be the same version, or frozen apps crash at launch. ---
+    && MANIFEST_VER="$(grep -oP '"pyinstaller_version":\s*"\K[^"]+' /bootloader-manifest.json)" \
+    && test "$MANIFEST_VER" = "$PYINSTALLER_VERSION" \
+        || { echo "ERROR: bootloader built for '$MANIFEST_VER' but image pins '$PYINSTALLER_VERSION'"; exit 1; } \
+    && test -n "$(find /wine/drive_c/Python/Lib/site-packages -maxdepth 1 -iname "pyinstaller-${PYINSTALLER_VERSION}.dist-info" -print -quit)" \
+        || { echo "ERROR: pip did not install PyInstaller==${PYINSTALLER_VERSION}"; exit 1; } \
+    # --- snapshot the STOCK (upstream wheel) bootloaders before overlaying ---
+    && mkdir -p /stock-bootloader \
+    && cp -a "$BL_DIR/." /stock-bootloader/ \
+    # --- overlay the freshly self-compiled bootloaders ---
+    && cp -a /custom-bootloader/. "$BL_DIR/" \
+    # --- fail-on-equal guard (step 2): every shipped exe MUST differ from the
+    #     stock wheel's, otherwise "custom" is a no-op. ---
+    && for f in "$BL_DIR"/Windows-*-intel/*.exe; do \
+         rel="${f#"$BL_DIR"/}"; stock="/stock-bootloader/$rel"; \
+         c="$(md5sum "$f" | cut -d' ' -f1)"; \
+         if [ -f "$stock" ]; then \
+             s="$(md5sum "$stock" | cut -d' ' -f1)"; \
+             echo "bootloader $rel: custom=$c stock=$s"; \
+             test "$c" != "$s" \
+                 || { echo "ERROR: $rel is byte-identical to the stock wheel bootloader (custom build is a NO-OP)"; exit 1; }; \
+         else \
+             echo "bootloader $rel: custom=$c (no stock counterpart)"; \
+         fi; \
+       done \
+    && echo "=== self-compiled bootloader manifest ===" \
+    && cat /bootloader-manifest.json \
+    && rm -rf /custom-bootloader /stock-bootloader
 
 RUN /usr/bin/pip install pywin32 \
     && /usr/bin/pip install tk \

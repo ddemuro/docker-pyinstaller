@@ -1,4 +1,27 @@
 #!/bin/bash
+#
+# Build the "-CUSTOM" images.
+#
+# CUSTOM = the Windows images ship a PyInstaller bootloader that is COMPILED FROM
+# SOURCE inside the image (msvc-wine cl.exe/link.exe under wine), not the prebuilt
+# binary from the pip wheel. See README.md ("What CUSTOM means") and the two build
+# stages in Dockerfile-py3-win64-CUSTOM / Dockerfile-py3-win32-CUSTOM.
+#
+# The single PYINSTALLER_VERSION arg below is the reproducible pin: it drives BOTH
+# the bootloader *source* (sdist) and the `pip install pyinstaller==` in the same
+# image, so the two can never diverge. The Windows builds enforce two guards and
+# will FAIL the build (non-zero exit, caught by printSuccessOrFail) if either is
+# violated:
+#   * version-pin guard  - the compiled bootloader's version must equal
+#                          PYINSTALLER_VERSION (a mismatched bootloader/PyInstaller
+#                          pair crashes frozen apps at launch), and
+#   * fail-on-equal guard - each shipped bootloader .exe must differ (md5) from the
+#                          stock wheel's, so a "custom" build can never silently
+#                          ship the stock bootloader.
+# Each build also emits and prints /bootloader-manifest.json for downstream pinning.
+#
+# Usage: ./build-images-CUSTOM.sh <PYTHON_VERSION> <PYINSTALLER_VERSION>
+#   e.g. ./build-images-CUSTOM.sh 3.12.9 6.13.0
 
 # Docker flags
 # URL=https://www.python.org/ftp/python/$1/
@@ -92,7 +115,9 @@ echo "Done downloading new version"
 echo "Building py3-$PYTHON_VERSION and pyinstaller $PYINSTALLER_VERSION for all Ubuntu LTS variants..."
 
 # Dockerfile paths - Ubuntu Linux amd64 base images
-declare -a UBUNTU_FILES=("Dockerfile-py3-amd64-20.04" "Dockerfile-py3-amd64-22.04" "Dockerfile-py3-amd64-24.04" "Dockerfile-py3-amd64-26.04")
+# CUSTOM-only Dockerfiles: these self-compile the Linux bootloader (native gcc).
+# The VAR builds use the plain Dockerfile-py3-amd64-<LTS> (stock bootloader).
+declare -a UBUNTU_FILES=("Dockerfile-py3-amd64-20.04-CUSTOM" "Dockerfile-py3-amd64-22.04-CUSTOM" "Dockerfile-py3-amd64-24.04-CUSTOM" "Dockerfile-py3-amd64-26.04-CUSTOM")
 declare -a UBUNTU_TAGS=("20.04" "22.04" "24.04" "26.04")
 declare -a PIDs
 
